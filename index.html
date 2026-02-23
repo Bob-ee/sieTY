@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thank You for Your Submission</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- JsBarcode for generating the barcode -->
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0fdf4',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4 font-sans text-gray-800">
+
+    <main class="bg-white rounded-2xl shadow-xl p-8 md:p-12 max-w-lg w-full text-center relative overflow-hidden">
+        <!-- Decorative top border -->
+        <div class="absolute top-0 left-0 w-full h-2 bg-brand-500"></div>
+
+        <!-- Success Icon -->
+        <div class="mx-auto w-16 h-16 bg-brand-50 rounded-full flex items-center justify-center mb-6">
+            <svg class="w-8 h-8 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+        </div>
+
+        <h1 class="text-3xl font-extrabold tracking-tight text-gray-900 mb-2">Thank You!</h1>
+        <p class="text-gray-500 mb-8">Your survey response has been successfully recorded. Please save the barcode below for your records or entry.</p>
+
+        <!-- Barcode Display Area -->
+        <div class="bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl p-6 min-h-[160px] flex flex-col items-center justify-center relative transition-all duration-300">
+            
+            <!-- Loading State -->
+            <div id="loading-state" class="flex flex-col items-center justify-center space-y-3">
+                <svg class="animate-spin h-8 w-8 text-brand-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="text-sm font-medium text-gray-500">Generating your barcode...</span>
+            </div>
+
+            <!-- Barcode SVG (Hidden until rendered) -->
+            <svg id="barcode" class="hidden max-w-full h-auto"></svg>
+
+            <!-- Error State (Hidden by default) -->
+            <div id="error-state" class="hidden flex flex-col items-center justify-center text-red-500 space-y-2">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <span id="error-message" class="text-sm font-medium">Unable to load barcode.</span>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+            <button onclick="window.print()" class="px-6 py-2.5 bg-brand-500 text-white font-medium rounded-lg hover:bg-brand-600 focus:ring-4 focus:ring-brand-50 focus:outline-none transition-colors w-full sm:w-auto shadow-sm">
+                Print Page
+            </button>
+            <a href="/" class="px-6 py-2.5 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 focus:ring-4 focus:ring-gray-50 focus:outline-none transition-colors w-full sm:w-auto shadow-sm">
+                Return Home
+            </a>
+        </div>
+    </main>
+
+    <script>
+        // ==========================================
+        // AIRTABLE CONFIGURATION
+        // ==========================================
+        // Note: For a production app, hitting Airtable directly from the frontend exposes your Personal Access Token.
+        // It is highly recommended to route this through a secure backend or serverless function later.
+        
+        const AIRTABLE_CONFIG = {
+            pat: 'YOUR_PERSONAL_ACCESS_TOKEN', // Replace with your Airtable Personal Access Token (PAT)
+            baseId: 'YOUR_BASE_ID',            // Replace with your Base ID (starts with 'app')
+            tableName: 'YOUR_TABLE_NAME',      // Replace with your Table Name (e.g., 'Surveys')
+            dataField: 'BarcodeData'           // Replace with the exact column name containing the string to encode
+        };
+
+        // ==========================================
+        // LOGIC
+        // ==========================================
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initBarcodeGeneration();
+        });
+
+        async function initBarcodeGeneration() {
+            // Assume the survey tool passes the Airtable Record ID in the URL, e.g., ?recordId=rec123456789
+            const urlParams = new URLSearchParams(window.location.search);
+            const recordId = urlParams.get('recordId');
+
+            // --- DEMO MODE CHECK ---
+            // If the PAT hasn't been changed from the default, or there is no recordId, show a demo barcode.
+            if (AIRTABLE_CONFIG.pat === 'YOUR_PERSONAL_ACCESS_TOKEN' || !recordId) {
+                console.warn("Running in Demo Mode: Missing URL parameter '?recordId=...' or Airtable PAT not configured.");
+                
+                // Simulate network request delay
+                setTimeout(() => {
+                    renderBarcode("DEMO-8675309");
+                }, 1200);
+                return;
+            }
+
+            // --- FETCH FROM AIRTABLE ---
+            try {
+                const endpoint = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.tableName}/${recordId}`;
+                
+                const response = await fetch(endpoint, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${AIRTABLE_CONFIG.pat}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Airtable error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                // Extract the specific field you want to encode
+                const stringToEncode = data.fields[AIRTABLE_CONFIG.dataField];
+
+                if (stringToEncode) {
+                    renderBarcode(stringToEncode);
+                } else {
+                    throw new Error(`Field '${AIRTABLE_CONFIG.dataField}' is empty or missing in this record.`);
+                }
+
+            } catch (error) {
+                console.error("Error fetching Airtable record:", error);
+                showError("We couldn't retrieve your barcode data. Please contact support.");
+            }
+        }
+
+        function renderBarcode(dataString) {
+            // Hide loading, show barcode SVG
+            document.getElementById('loading-state').classList.add('hidden');
+            const barcodeElement = document.getElementById('barcode');
+            barcodeElement.classList.remove('hidden');
+
+            // Generate barcode using JsBarcode
+            try {
+                JsBarcode("#barcode", dataString, {
+                    format: "CODE128", // Standard barcode format
+                    lineColor: "#111827", // Tailwind gray-900
+                    width: 2,
+                    height: 80,
+                    displayValue: true,
+                    fontSize: 16,
+                    fontOptions: "bold",
+                    textMargin: 8,
+                    background: "transparent"
+                });
+            } catch (err) {
+                console.error("Barcode generation failed:", err);
+                showError("Invalid data format for barcode generation.");
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('barcode').classList.add('hidden');
+            
+            const errorState = document.getElementById('error-state');
+            const errorMessage = document.getElementById('error-message');
+            
+            errorMessage.textContent = message;
+            errorState.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
