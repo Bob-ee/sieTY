@@ -87,7 +87,8 @@
             pat: 'YOUR_PERSONAL_ACCESS_TOKEN', // Replace with your Airtable Personal Access Token (PAT)
             baseId: 'YOUR_BASE_ID',            // Replace with your Base ID (starts with 'app')
             tableName: 'YOUR_TABLE_NAME',      // Replace with your Table Name (e.g., 'Surveys')
-            dataField: 'BarcodeData'           // Replace with the exact column name containing the string to encode
+            dataField: 'BarcodeData',          // Replace with the column name containing the string to encode
+            searchField: 'TallyID'             // Replace with the column name where Tally saves its @responseId
         };
 
         // ==========================================
@@ -99,25 +100,28 @@
         });
 
         async function initBarcodeGeneration() {
-            // Assume the survey tool passes the Airtable Record ID in the URL, e.g., ?recordId=rec123456789
             const urlParams = new URLSearchParams(window.location.search);
-            const recordId = urlParams.get('recordId');
+            // We now look for a custom ID passed by Tally (e.g., ?tallyId=xxx)
+            const tallyId = urlParams.get('tallyId'); 
 
             // --- DEMO MODE CHECK ---
-            // If the PAT hasn't been changed from the default, or there is no recordId, show a demo barcode.
-            if (AIRTABLE_CONFIG.pat === 'YOUR_PERSONAL_ACCESS_TOKEN' || !recordId) {
-                console.warn("Running in Demo Mode: Missing URL parameter '?recordId=...' or Airtable PAT not configured.");
-                
-                // Simulate network request delay
+            if (AIRTABLE_CONFIG.pat === 'YOUR_PERSONAL_ACCESS_TOKEN' || !tallyId) {
+                console.warn("Running in Demo Mode: Missing '?tallyId=...' or Airtable PAT not configured.");
                 setTimeout(() => {
                     renderBarcode("DEMO-8675309");
                 }, 1200);
                 return;
             }
 
-            // --- FETCH FROM AIRTABLE ---
+            // Start the polling process to find the record
+            pollAirtableForRecord(tallyId);
+        }
+
+        async function pollAirtableForRecord(tallyId, maxRetries = 10, currentAttempt = 1) {
             try {
-                const endpoint = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.tableName}/${recordId}`;
+                // Use filterByFormula to search for the specific Tally ID
+                const formula = encodeURIComponent(`{${AIRTABLE_CONFIG.searchField}} = '${tallyId}'`);
+                const endpoint = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.tableName}?filterByFormula=${formula}&maxRecords=1`;
                 
                 const response = await fetch(endpoint, {
                     method: 'GET',
@@ -133,18 +137,30 @@
 
                 const data = await response.json();
                 
-                // Extract the specific field you want to encode
-                const stringToEncode = data.fields[AIRTABLE_CONFIG.dataField];
+                // Check if we found a matching record
+                if (data.records && data.records.length > 0) {
+                    const record = data.records[0];
+                    const stringToEncode = record.fields[AIRTABLE_CONFIG.dataField];
 
-                if (stringToEncode) {
-                    renderBarcode(stringToEncode);
+                    if (stringToEncode) {
+                        renderBarcode(stringToEncode);
+                    } else {
+                        showError(`Field '${AIRTABLE_CONFIG.dataField}' is empty in this record.`);
+                    }
                 } else {
-                    throw new Error(`Field '${AIRTABLE_CONFIG.dataField}' is empty or missing in this record.`);
+                    // Record not found yet. The integration might be taking a few seconds.
+                    if (currentAttempt < maxRetries) {
+                        console.log(`Record not found. Retrying... (Attempt ${currentAttempt + 1} of ${maxRetries})`);
+                        // Wait 1.5 seconds before trying again
+                        setTimeout(() => pollAirtableForRecord(tallyId, maxRetries, currentAttempt + 1), 1500);
+                    } else {
+                        showError("We couldn't locate your survey data. Please refresh the page to try again.");
+                    }
                 }
 
             } catch (error) {
                 console.error("Error fetching Airtable record:", error);
-                showError("We couldn't retrieve your barcode data. Please contact support.");
+                showError("A connection error occurred. Please contact support.");
             }
         }
 
